@@ -275,7 +275,9 @@ func selectMirrorHost(mirrorsConfigDir, registryHost string) (scheme string, hos
 	return "", registryHost, nil
 }
 
-// splitMirrorURL splits a mirror host URL (e.g. "http://mirror:5000") into scheme and bare host.
+// splitMirrorURL splits a mirror host URL (e.g. "http://mirror:5000") into scheme and
+// host, keeping the port and any path prefix (e.g. "https://proxy.test/docker.io" ->
+// "proxy.test/docker.io") since nydusd appends "/v2/<repo>/..." to the host.
 // Scheme is forced to be https if not present.
 func splitMirrorURL(mirrorHost string) (scheme, host string, err error) {
 	// url.Parse requires a scheme to properly works even if it doesn't returns an error
@@ -286,7 +288,7 @@ func splitMirrorURL(mirrorHost string) (scheme, host string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	return value.Scheme, value.Host, nil
+	return value.Scheme, strings.TrimSuffix(value.Host+value.Path, "/"), nil
 }
 
 func serializeWithSecretFilter(obj interface{}) map[string]interface{} {

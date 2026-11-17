@@ -67,7 +67,25 @@ func TestSplitMirrorURL(t *testing.T) {
 			name:           "http with path",
 			input:          "http://mirror.example.com/v2",
 			expectedScheme: "http",
-			expectedHost:   "mirror.example.com",
+			expectedHost:   "mirror.example.com/v2",
+		},
+		{
+			name:           "https with proxy path prefix",
+			input:          "https://proxy.example.test/docker.io",
+			expectedScheme: "https",
+			expectedHost:   "proxy.example.test/docker.io",
+		},
+		{
+			name:           "https with proxy path prefix and trailing slash",
+			input:          "https://proxy.example.test/docker.io/",
+			expectedScheme: "https",
+			expectedHost:   "proxy.example.test/docker.io",
+		},
+		{
+			name:           "host with port and no path is unchanged",
+			input:          "proxy.example.test:5000",
+			expectedScheme: "https",
+			expectedHost:   "proxy.example.test:5000",
 		},
 	}
 	for _, tc := range cases {
@@ -158,4 +176,40 @@ func TestSelectMirrorHost_FirstMirrorFails_SecondMirrorNoPing(t *testing.T) {
 	scheme, host, _ := selectMirrorHost(tmpDir, testRegistryHost)
 	require.Equal(t, "mirror2.example.com", host)
 	require.Equal(t, "https", scheme)
+}
+
+// A mirror that serves the upstream registry under a path prefix must keep that
+// prefix, otherwise nydusd resolves blobs against the mirror root and 404s.
+func TestSelectMirrorHost_MirrorPathPreserved(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeMirrorHostsToml(t, tmpDir, `
+[host]
+  [host."https://proxy.example.test/docker.io"]
+`)
+	scheme, host, _ := selectMirrorHost(tmpDir, testRegistryHost)
+	require.Equal(t, "https", scheme)
+	require.Equal(t, "proxy.example.test/docker.io", host)
+}
+
+// The host written into the generated nydusd configuration (what nydusd reads for
+// [remote] / backend host resolution) must carry the mirror path prefix.
+func TestFuseDaemonConfig_MirrorPathInGeneratedConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeMirrorHostsToml(t, tmpDir, `
+[host]
+  [host."https://proxy.example.test/docker.io"]
+`)
+	scheme, host, _ := selectMirrorHost(tmpDir, testRegistryHost)
+	require.Equal(t, "proxy.example.test/docker.io", host)
+
+	cfg := &FuseDaemonConfig{Device: &DeviceConfig{}}
+	cfg.Device.Backend.BackendType = backendTypeRegistry
+	cfg.Supplement(host, "library/python", "snap-1", map[string]string{CacheDir: "/var/lib/nydus/cache"})
+	cfg.Device.Backend.Config.Scheme = scheme
+
+	dump, err := cfg.DumpString()
+	require.NoError(t, err)
+	require.Contains(t, dump, `"host":"proxy.example.test/docker.io"`)
+	require.Contains(t, dump, `"repo":"library/python"`)
+	require.Contains(t, dump, `"scheme":"https"`)
 }

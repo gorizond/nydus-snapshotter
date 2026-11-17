@@ -162,7 +162,9 @@ func parseHostConfig(server string, config HostFileConfig) (hostConfig, error) {
 		return hostConfig{}, fmt.Errorf("unable to parse server %v: %w", server, err)
 	}
 	result.Scheme = u.Scheme
-	result.Host = u.Host
+	// Preserve the path prefix (e.g. "https://proxy.test/docker.io"), mirrors such
+	// as Dragonfly serve the upstream registry under a path.
+	result.Host = strings.TrimSuffix(u.Host+u.Path, "/")
 
 	if config.Header != nil {
 		header := http.Header{}
